@@ -33,7 +33,11 @@ test-chart:
 	docker run -t --rm -v ./deployments/kai-scheduler:/apps helmunittest/helm-unittest:3.17.2-0.8.1 . -f 'tests/**/*_test.yaml'
 
 .PHONY: test
-test: test-chart envtest-docker-go
+test: test-image-catalog test-chart envtest-docker-go
+
+.PHONY: test-image-catalog
+test-image-catalog:
+	python3 -m unittest discover -s hack -p '*_test.py'
 
 .PHONY: build
 build: $(SERVICE_NAMES)
