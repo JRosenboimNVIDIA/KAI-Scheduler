@@ -31,6 +31,7 @@ DOCKER_BUILD_ADDITIONAL_ARGS=--target prod
 endif
 
 DOCKER_BUILDX_ADDITIONAL_ARGS?=
+IMAGE_METADATA_DIR?=
 
 ################### OS DEPENDENCY ##########################
 # Build the project
@@ -63,5 +64,6 @@ docker-build-crd-upgrader:
 .PHONY: docker-build-crd-upgrader
 
 docker-build-generic:
-	DOCKER_BUILDKIT=1 docker buildx build ${DOCKER_BUILD_ADDITIONAL_ARGS} --build-arg SERVICE_NAME=${SERVICE_NAME} -f ${DOCKERFILE_PATH} -t ${DOCKER_IMAGE_NAME} ${DOCKER_BUILDX_ADDITIONAL_ARGS} --platform ${DOCKER_BUILD_PLATFORM} .
+	@if [ -n "${IMAGE_METADATA_DIR}" ]; then mkdir -p "${IMAGE_METADATA_DIR}"; fi
+	DOCKER_BUILDKIT=1 docker buildx build ${DOCKER_BUILD_ADDITIONAL_ARGS} --build-arg SERVICE_NAME=${SERVICE_NAME} -f ${DOCKERFILE_PATH} -t ${DOCKER_IMAGE_NAME} ${DOCKER_BUILDX_ADDITIONAL_ARGS} $(if ${IMAGE_METADATA_DIR},--metadata-file ${IMAGE_METADATA_DIR}/${SERVICE_NAME}.json) --platform ${DOCKER_BUILD_PLATFORM} .
 .PHONY: docker-build-generic

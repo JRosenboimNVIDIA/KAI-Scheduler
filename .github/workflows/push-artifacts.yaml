@@ -28,15 +28,15 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           PACKAGE_VERSION=${GITHUB_REF_NAME}
-          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
-          echo $PACKAGE_VERSION
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "$PACKAGE_VERSION"
 
       - name: Extract package version from branch commit
         if: startsWith(github.ref, 'refs/heads/')
         run: |
-          PACKAGE_VERSION=0.0.0-$(git rev-parse --short HEAD)
-          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
-          echo $PACKAGE_VERSION
+          PACKAGE_VERSION="0.0.0-$(git rev-parse --short HEAD)"
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "$PACKAGE_VERSION"
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -54,16 +54,22 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Docker build & push
-        run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=$PACKAGE_VERSION DOCKER_BUILDX_ADDITIONAL_ARGS=--push
+        run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE="${{ env.DOCKER_REGISTRY }}" VERSION="$PACKAGE_VERSION" IMAGE_METADATA_DIR=build/image-metadata/standard DOCKER_BUILDX_ADDITIONAL_ARGS=--push
+
+      - name: Upload image metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-metadata-standard
+          path: build/image-metadata/standard
 
       - name: Build helm chart
         run: |
           sed -i 's#registry/local/kai-scheduler#${{ env.DOCKER_REGISTRY }}#' deployments/kai-scheduler/values.yaml
-          helm package ./deployments/kai-scheduler -d ./charts --app-version $PACKAGE_VERSION --version $PACKAGE_VERSION
+          helm package ./deployments/kai-scheduler -d ./charts --app-version "$PACKAGE_VERSION" --version "$PACKAGE_VERSION"
 
       - name: Push Helm Chart
         run: |
-          helm push ./charts/kai-scheduler-$PACKAGE_VERSION.tgz oci://${{ env.DOCKER_REGISTRY }}
+          helm push "./charts/kai-scheduler-$PACKAGE_VERSION.tgz" "oci://${{ env.DOCKER_REGISTRY }}"
 
   build-and-push-fips:
     name: Build & Push FIPS
@@ -76,8 +82,8 @@ jobs:
       - name: Extract package version from tag
         run: |
           PACKAGE_VERSION=${GITHUB_REF_NAME}
-          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
-          echo $PACKAGE_VERSION
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "$PACKAGE_VERSION"
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -95,10 +101,123 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Docker build & push FIPS images
-        run: make build FIPS=1 DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=$PACKAGE_VERSION DOCKER_BUILDX_ADDITIONAL_ARGS=--push
+        run: make build FIPS=1 DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE="${{ env.DOCKER_REGISTRY }}" VERSION="$PACKAGE_VERSION" IMAGE_METADATA_DIR=build/image-metadata/fips DOCKER_BUILDX_ADDITIONAL_ARGS=--push
 
       - name: Verify binaries are FIPS-enabled
         run: |
           for f in bin/*-amd64 bin/*-arm64; do
             go version -m "$f" | grep -q 'GOFIPS140=v1.0.0' || { echo "$f is not FIPS-enabled"; exit 1; }
           done
+
+      - name: Upload FIPS image metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-metadata-fips
+          path: build/image-metadata/fips
+
+  publish-image-locks:
+    name: Publish image locks
+    needs:
+      - build-and-push
+      - build-and-push-fips
+    if: always() && needs.build-and-push.result == 'success' && (needs.build-and-push-fips.result == 'success' || needs.build-and-push-fips.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Extract package version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            PACKAGE_VERSION=${GITHUB_REF_NAME}
+          else
+            PACKAGE_VERSION="0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Download standard image metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: image-metadata-standard
+          path: build/image-metadata/standard
+
+      - name: Download FIPS image metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/download-artifact@v8
+        with:
+          name: image-metadata-fips
+          path: build/image-metadata/fips
+
+      - name: Fetch multi-architecture image manifests
+        run: |
+          mkdir -p build/image-manifests/standard
+          for metadata in build/image-metadata/standard/*.json; do
+            name=$(basename "$metadata" .json)
+            docker buildx imagetools inspect \
+              "${{ env.DOCKER_REGISTRY }}/$name:$PACKAGE_VERSION" \
+              --raw > "build/image-manifests/standard/$name.json"
+          done
+          if [[ -d build/image-metadata/fips ]]; then
+            mkdir -p build/image-manifests/fips
+            for metadata in build/image-metadata/fips/*.json; do
+              name=$(basename "$metadata" .json)
+              docker buildx imagetools inspect \
+                "${{ env.DOCKER_REGISTRY }}/$name:$PACKAGE_VERSION-fips" \
+                --raw > "build/image-manifests/fips/$name.json"
+            done
+          fi
+
+      - name: Install image catalog dependencies
+        run: python3 -m pip install -r hack/image_catalog_requirements.txt
+
+      - name: Generate image locks
+        run: |
+          FIPS_ARGS=()
+          if [[ -d build/image-metadata/fips ]]; then
+            FIPS_ARGS=(
+              --fips-metadata build/image-metadata/fips
+              --fips-manifests build/image-manifests/fips
+            )
+          fi
+          python3 hack/generate_image_catalog.py \
+            --version "$PACKAGE_VERSION" \
+            --registry "${{ env.DOCKER_REGISTRY }}" \
+            --standard-metadata build/image-metadata/standard \
+            --standard-manifests build/image-manifests/standard \
+            "${FIPS_ARGS[@]}" \
+            --chart-values deployments/kai-scheduler/values.yaml \
+            --platform linux/amd64 \
+            --platform linux/arm64 \
+            --output-dir dist/image-locks
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Push image locks
+        run: |
+          for lock in dist/image-locks/*.yaml; do
+            profile=$(basename "$lock" .yaml)
+            profile=${profile#"kai-scheduler-$PACKAGE_VERSION-"}
+            oras push "${{ env.DOCKER_REGISTRY }}/image-lock:$PACKAGE_VERSION-$profile" \
+              --artifact-type application/vnd.kai-scheduler.image-lock.v1+yaml \
+              "$lock:application/yaml"
+          done
+
+      - name: Upload image locks
+        uses: actions/upload-artifact@v7
+        with:
+          name: kai-scheduler-image-locks-${{ env.PACKAGE_VERSION }}
+          path: dist/image-locks
