@@ -136,6 +136,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
       - name: Download standard image metadata
         uses: actions/download-artifact@v8
         with:
@@ -149,22 +152,48 @@ jobs:
           name: image-metadata-fips
           path: build/image-metadata/fips
 
-      - name: Generate image catalog
+      - name: Fetch multi-architecture image manifests
+        run: |
+          mkdir -p build/image-manifests/standard
+          for metadata in build/image-metadata/standard/*.json; do
+            name=$(basename "$metadata" .json)
+            docker buildx imagetools inspect \
+              "${{ env.DOCKER_REGISTRY }}/$name:$PACKAGE_VERSION" \
+              --raw > "build/image-manifests/standard/$name.json"
+          done
+          if [[ -d build/image-metadata/fips ]]; then
+            mkdir -p build/image-manifests/fips
+            for metadata in build/image-metadata/fips/*.json; do
+              name=$(basename "$metadata" .json)
+              docker buildx imagetools inspect \
+                "${{ env.DOCKER_REGISTRY }}/$name:$PACKAGE_VERSION-fips" \
+                --raw > "build/image-manifests/fips/$name.json"
+            done
+          fi
+
+      - name: Install image catalog dependencies
+        run: python3 -m pip install -r hack/image_catalog_requirements.txt
+
+      - name: Generate image locks
         run: |
           FIPS_ARGS=()
           if [[ -d build/image-metadata/fips ]]; then
-            FIPS_ARGS=(--fips-metadata build/image-metadata/fips)
+            FIPS_ARGS=(
+              --fips-metadata build/image-metadata/fips
+              --fips-manifests build/image-manifests/fips
+            )
           fi
           python3 hack/generate_image_catalog.py \
             --version "$PACKAGE_VERSION" \
             --registry "${{ env.DOCKER_REGISTRY }}" \
             --standard-metadata build/image-metadata/standard \
+            --standard-manifests build/image-manifests/standard \
             "${FIPS_ARGS[@]}" \
             --chart-values deployments/kai-scheduler/values.yaml \
             --platform linux/amd64 \
             --platform linux/arm64 \
-            --output deployments/kai-scheduler/images.yaml
-          cp deployments/kai-scheduler/images.yaml "kai-scheduler-images-$PACKAGE_VERSION.yaml"
+            --output-dir dist/image-locks
+          cp -r dist/image-locks deployments/kai-scheduler/image-locks
 
       - name: Build and push Helm chart
         run: |
@@ -175,14 +204,18 @@ jobs:
       - name: Set up ORAS
         uses: oras-project/setup-oras@v1
 
-      - name: Push image catalog
+      - name: Push image locks
         run: |
-          oras push "${{ env.DOCKER_REGISTRY }}/image-catalog:$PACKAGE_VERSION" \
-            --artifact-type application/vnd.kai-scheduler.image-catalog.v1+yaml \
-            "kai-scheduler-images-$PACKAGE_VERSION.yaml:application/yaml"
+          for lock in dist/image-locks/*.yaml; do
+            profile=$(basename "$lock" .yaml)
+            profile=${profile#kai-scheduler-$PACKAGE_VERSION-}
+            oras push "${{ env.DOCKER_REGISTRY }}/image-lock:$PACKAGE_VERSION-$profile" \
+              --artifact-type application/vnd.kai-scheduler.image-lock.v1+yaml \
+              "$lock:application/yaml"
+          done
 
-      - name: Upload image catalog
+      - name: Upload image locks
         uses: actions/upload-artifact@v7
         with:
-          name: kai-scheduler-images-${{ env.PACKAGE_VERSION }}
-          path: kai-scheduler-images-${{ env.PACKAGE_VERSION }}.yaml
+          name: kai-scheduler-image-locks-${{ env.PACKAGE_VERSION }}
+          path: dist/image-locks

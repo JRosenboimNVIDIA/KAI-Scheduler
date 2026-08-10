@@ -7,8 +7,10 @@ import pathlib
 import tempfile
 import unittest
 
+from generate_image_catalog import catalog_path
 from generate_image_catalog import load_build_metadata
 from generate_image_catalog import load_chart_images
+from generate_image_catalog import load_platform_manifests
 from generate_image_catalog import render_catalog
 
 
@@ -36,6 +38,41 @@ class GenerateImageCatalogTest(unittest.TestCase):
                 load_build_metadata(path),
             )
 
+    def test_load_platform_manifests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory)
+            (path / "scheduler.json").write_text(
+                json.dumps(
+                    {
+                        "manifests": [
+                            {
+                                "digest": "sha256:amd64",
+                                "platform": {
+                                    "os": "linux",
+                                    "architecture": "amd64",
+                                },
+                            },
+                            {
+                                "digest": "sha256:arm64",
+                                "platform": {
+                                    "os": "linux",
+                                    "architecture": "arm64",
+                                },
+                            },
+                        ]
+                    }
+                )
+            )
+            self.assertEqual(
+                {
+                    "scheduler": {
+                        "linux/amd64": "sha256:amd64",
+                        "linux/arm64": "sha256:arm64",
+                    }
+                },
+                load_platform_manifests(path),
+            )
+
     def test_load_chart_images_includes_optional_images(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "values.yaml"
@@ -59,23 +96,39 @@ global:
                 load_chart_images(path),
             )
 
-    def test_render_catalog_includes_fips_digest(self):
+    def test_render_catalog_selects_variant_and_platform(self):
         catalog = render_catalog(
             "v1.2.3",
             "ghcr.io/kai-scheduler/kai-scheduler",
-            ["linux/amd64", "linux/arm64"],
-            {"scheduler": "sha256:standard"},
-            {"scheduler": "sha256:fips"},
+            "fips",
+            "linux/arm64",
+            {"scheduler": "sha256:index"},
+            {"scheduler": {"linux/arm64": "sha256:arm64"}},
         )
-        self.assertIn(
-            'image: "ghcr.io/kai-scheduler/kai-scheduler/scheduler:v1.2.3"',
-            catalog,
+        self.assertEqual("fips", catalog["spec"]["variant"])
+        self.assertEqual(
+            {"os": "linux", "architecture": "arm64"},
+            catalog["spec"]["platform"],
         )
-        self.assertIn(
-            'image: "ghcr.io/kai-scheduler/kai-scheduler/scheduler:v1.2.3-fips"',
-            catalog,
+        self.assertEqual(
+            "ghcr.io/kai-scheduler/kai-scheduler/scheduler:v1.2.3-fips",
+            catalog["spec"]["images"][0]["source"],
         )
-        self.assertIn('digest: "sha256:fips"', catalog)
+        self.assertEqual(
+            "sha256:arm64",
+            catalog["spec"]["images"][0]["digest"],
+        )
+
+    def test_catalog_path(self):
+        output = pathlib.Path("dist")
+        self.assertEqual(
+            output / "kai-scheduler-v1.2.3-linux-amd64.yaml",
+            catalog_path(output, "v1.2.3", "standard", "linux/amd64"),
+        )
+        self.assertEqual(
+            output / "kai-scheduler-v1.2.3-fips-linux-arm64.yaml",
+            catalog_path(output, "v1.2.3", "fips", "linux/arm64"),
+        )
 
 
 if __name__ == "__main__":

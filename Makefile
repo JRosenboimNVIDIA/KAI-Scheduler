@@ -37,6 +37,7 @@ test: test-image-catalog test-chart envtest-docker-go
 
 .PHONY: test-image-catalog
 test-image-catalog:
+	python3 -m pip install -r hack/image_catalog_requirements.txt
 	python3 -m unittest discover -s hack -p '*_test.py'
 
 .PHONY: build
