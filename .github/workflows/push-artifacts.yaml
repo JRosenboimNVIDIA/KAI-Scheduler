@@ -62,6 +62,15 @@ jobs:
           name: image-metadata-standard
           path: build/image-metadata/standard
 
+      - name: Build helm chart
+        run: |
+          sed -i 's#registry/local/kai-scheduler#${{ env.DOCKER_REGISTRY }}#' deployments/kai-scheduler/values.yaml
+          helm package ./deployments/kai-scheduler -d ./charts --app-version $PACKAGE_VERSION --version $PACKAGE_VERSION
+
+      - name: Push Helm Chart
+        run: |
+          helm push ./charts/kai-scheduler-$PACKAGE_VERSION.tgz oci://${{ env.DOCKER_REGISTRY }}
+
   build-and-push-fips:
     name: Build & Push FIPS
     if: startsWith(github.ref, 'refs/tags/')
@@ -106,8 +115,8 @@ jobs:
           name: image-metadata-fips
           path: build/image-metadata/fips
 
-  publish-catalog-and-chart:
-    name: Publish image catalog & chart
+  publish-image-locks:
+    name: Publish image locks
     needs:
       - build-and-push
       - build-and-push-fips
@@ -193,13 +202,6 @@ jobs:
             --platform linux/amd64 \
             --platform linux/arm64 \
             --output-dir dist/image-locks
-          cp -r dist/image-locks deployments/kai-scheduler/image-locks
-
-      - name: Build and push Helm chart
-        run: |
-          sed -i 's#registry/local/kai-scheduler#${{ env.DOCKER_REGISTRY }}#' deployments/kai-scheduler/values.yaml
-          helm package ./deployments/kai-scheduler -d ./charts --app-version "$PACKAGE_VERSION" --version "$PACKAGE_VERSION"
-          helm push "./charts/kai-scheduler-$PACKAGE_VERSION.tgz" oci://${{ env.DOCKER_REGISTRY }}
 
       - name: Set up ORAS
         uses: oras-project/setup-oras@v1
