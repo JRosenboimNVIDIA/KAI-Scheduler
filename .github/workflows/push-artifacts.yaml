@@ -28,15 +28,15 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           PACKAGE_VERSION=${GITHUB_REF_NAME}
-          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
-          echo $PACKAGE_VERSION
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "$PACKAGE_VERSION"
 
       - name: Extract package version from branch commit
         if: startsWith(github.ref, 'refs/heads/')
         run: |
-          PACKAGE_VERSION=0.0.0-$(git rev-parse --short HEAD)
-          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
-          echo $PACKAGE_VERSION
+          PACKAGE_VERSION="0.0.0-$(git rev-parse --short HEAD)"
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "$PACKAGE_VERSION"
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -54,7 +54,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Docker build & push
-        run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=$PACKAGE_VERSION IMAGE_METADATA_DIR=build/image-metadata/standard DOCKER_BUILDX_ADDITIONAL_ARGS=--push
+        run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE="${{ env.DOCKER_REGISTRY }}" VERSION="$PACKAGE_VERSION" IMAGE_METADATA_DIR=build/image-metadata/standard DOCKER_BUILDX_ADDITIONAL_ARGS=--push
 
       - name: Upload image metadata
         uses: actions/upload-artifact@v7
@@ -65,11 +65,11 @@ jobs:
       - name: Build helm chart
         run: |
           sed -i 's#registry/local/kai-scheduler#${{ env.DOCKER_REGISTRY }}#' deployments/kai-scheduler/values.yaml
-          helm package ./deployments/kai-scheduler -d ./charts --app-version $PACKAGE_VERSION --version $PACKAGE_VERSION
+          helm package ./deployments/kai-scheduler -d ./charts --app-version "$PACKAGE_VERSION" --version "$PACKAGE_VERSION"
 
       - name: Push Helm Chart
         run: |
-          helm push ./charts/kai-scheduler-$PACKAGE_VERSION.tgz oci://${{ env.DOCKER_REGISTRY }}
+          helm push "./charts/kai-scheduler-$PACKAGE_VERSION.tgz" "oci://${{ env.DOCKER_REGISTRY }}"
 
   build-and-push-fips:
     name: Build & Push FIPS
@@ -82,8 +82,8 @@ jobs:
       - name: Extract package version from tag
         run: |
           PACKAGE_VERSION=${GITHUB_REF_NAME}
-          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
-          echo $PACKAGE_VERSION
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "$PACKAGE_VERSION"
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -101,7 +101,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Docker build & push FIPS images
-        run: make build FIPS=1 DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=$PACKAGE_VERSION IMAGE_METADATA_DIR=build/image-metadata/fips DOCKER_BUILDX_ADDITIONAL_ARGS=--push
+        run: make build FIPS=1 DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE="${{ env.DOCKER_REGISTRY }}" VERSION="$PACKAGE_VERSION" IMAGE_METADATA_DIR=build/image-metadata/fips DOCKER_BUILDX_ADDITIONAL_ARGS=--push
 
       - name: Verify binaries are FIPS-enabled
         run: |
@@ -134,7 +134,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             PACKAGE_VERSION=${GITHUB_REF_NAME}
           else
-            PACKAGE_VERSION=0.0.0-$(git rev-parse --short HEAD)
+            PACKAGE_VERSION="0.0.0-$(git rev-parse --short HEAD)"
           fi
           echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
 
@@ -210,7 +210,7 @@ jobs:
         run: |
           for lock in dist/image-locks/*.yaml; do
             profile=$(basename "$lock" .yaml)
-            profile=${profile#kai-scheduler-$PACKAGE_VERSION-}
+            profile=${profile#"kai-scheduler-$PACKAGE_VERSION-"}
             oras push "${{ env.DOCKER_REGISTRY }}/image-lock:$PACKAGE_VERSION-$profile" \
               --artifact-type application/vnd.kai-scheduler.image-lock.v1+yaml \
               "$lock:application/yaml"
