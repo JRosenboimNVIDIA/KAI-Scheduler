@@ -121,6 +121,14 @@ esac
     echo "  labels:"
     if [ "$GPU_STACK" = "mokka" ]; then
       echo '    mokka.nvidia.com/e2e-gpu: "true"'
+      if [ "$FEATURE_CONFIG" = "numa-full" ]; then
+        case "$pool" in
+          numa-single) policy=single-numa-node ;;
+          numa-besteffort) policy=best-effort ;;
+          *) policy=restricted ;;
+        esac
+        echo "    mokka.nvidia.com/numa-policy: $policy"
+      fi
       continue
     fi
     echo "    run.ai/simulated-gpu-node-pool: $pool"
@@ -145,4 +153,8 @@ esac
 
   echo "# CPU Node"
   echo "- role: worker"
+  if [ "$GPU_STACK" = "mokka" ] && [ "$FEATURE_CONFIG" = "numa-full" ]; then
+    echo "  labels:"
+    echo '    mokka.nvidia.com/e2e-cpu: "true"'
+  fi
 } > "$OUTPUT"

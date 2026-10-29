@@ -111,6 +111,7 @@ runs:
       shell: bash
       env:
         CLUSTER_NAME: kind
+        FEATURE_CONFIG: ${{ inputs.feature_config }}
       run: ./hack/install-mokka-gpu-operator.sh
 
     - name: Deploy fake gpu operator for dedicated legacy layouts
