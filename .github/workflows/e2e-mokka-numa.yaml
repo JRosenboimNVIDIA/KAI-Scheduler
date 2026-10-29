@@ -47,6 +47,14 @@ jobs:
           # Leave space for source builds, six kind nodes, and the real GPU stack.
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           df -h
+      - name: Validate KAI chart configuration before building images
+        run: |
+          helm dependency build ./deployments/kai-scheduler
+          helm template kai-scheduler ./deployments/kai-scheduler \
+            --namespace kai-scheduler \
+            --values hack/kai-scheduler-mokka-values.yaml \
+            --values hack/kai-scheduler-mokka-numa-values.yaml \
+            --set global.registry=localhost:30100 --set prometheus.enabled=true > /tmp/kai-numa-rendered.yaml
       - name: Build KAI from this PR and install Mokka, GPU Operator, and NRT reporter
         run: |
           ./hack/setup-e2e-cluster.sh --local-images-build --skip-kai-install --feature-config numa-full
@@ -59,7 +67,6 @@ jobs:
             --values hack/kai-scheduler-mokka-values.yaml \
             --values hack/kai-scheduler-mokka-numa-values.yaml \
             --set global.registry=localhost:30100 --set prometheus.enabled=true \
-            --set 'global.nodeSelector.mokka\.nvidia\.com/e2e-cpu=true'  \
             --wait --timeout 10m
           kubectl -n kai-scheduler rollout status deployment/kai-operator --timeout=5m
       - name: Run all NUMA cases, including nightly cases

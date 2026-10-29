@@ -77,7 +77,6 @@ helm upgrade --install kai-scheduler "./charts/kai-scheduler-$PACKAGE_VERSION.tg
   --values hack/kai-scheduler-mokka-values.yaml \
   --values hack/kai-scheduler-mokka-numa-values.yaml \
   --set global.registry=localhost:30100 --set prometheus.enabled=true \
-  --set 'global.nodeSelector.mokka\.nvidia\.com/e2e-cpu=true' \
   --wait --timeout 10m
 go tool ginkgo --keep-going --trace -vv --label-filter numa --timeout 45m \
   --output-dir=numa-results --json-report=report.json --junit-report=junit.xml \
