@@ -30,8 +30,12 @@ def check():
                            if zone["type"] == "Node" for resource in zone.get("resources", [])
                            if resource["name"] == "nvidia.com/gpu")
         assert gpu_zones == [4, 4], (name, gpu_zones)
+        cpu_zones = [int(resource["allocatable"]) for zone in report["zones"]
+                     if zone["type"] == "Node" for resource in zone.get("resources", [])
+                     if resource["name"] == "cpu"]
+        assert len(cpu_zones) == 2 and min(cpu_zones) >= 1, (name, cpu_zones)
         policies.append(policy)
-        print(f"{name}: {policy}, GPUs per zone: {gpu_zones}", flush=True)
+        print(f"{name}: {policy}, GPUs per zone: {gpu_zones}, CPUs: {cpu_zones}", flush=True)
     assert sorted(policies) == ["best-effort", "restricted", "single-numa-node", "single-numa-node"]
 
 

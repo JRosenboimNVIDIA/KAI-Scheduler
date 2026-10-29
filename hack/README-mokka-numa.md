@@ -13,7 +13,8 @@ Mokka is pinned to `51e4d79be7fe377804269c00194ca60efca25dd8` in the public
 `JRosenboimNVIDIA/mokka` fork. This includes Roman's GPU Operator support,
 the memory-limit API fix, and the opt-in NUMA simulation. Three disjoint
 Mokka releases set `numaSimulation.enabled=true`, `configureKubelet=true`,
-and the required `topologyManagerPolicy`. Mokka changes each selected
+the required `topologyManagerPolicy`, and `cpuManagerPolicy: static`. One real CPU
+is reserved for the system pool. Mokka changes each selected
 kind node's sysfs view and restarts its kubelet. Only disposable kind nodes
 are used.
 
@@ -31,12 +32,11 @@ cluster logs are uploaded even if setup or tests fail.
 
 ## Current limits
 
-CPU Manager is `none` and Memory Manager is `None`. NFD excludes CPU and
-memory resources. Cases that require these resources can skip. This run
-does not prove CPU or memory locality.
+CPU Manager is `static` and Memory Manager is `None`. NFD publishes CPU and GPU
+resources, and excludes memory. A dedicated case checks that a Guaranteed pod
+receives one real CPU and one GPU in the same observed zone. Cases that require these resources can skip. This run does not prove physical memory locality.
 
-CPU locality needs real CPU IDs per zone, a working static CPU Manager,
-reserved CPUs, and suitable Guaranteed pod requests. Memory locality also
+CPU placement uses real online CPU IDs in the simulated zones. Memory locality
 needs memory NUMA nodes that the Linux kernel can use. Sysfs files alone
 do not create those kernel memory nodes. A NUMA-capable VM or kernel NUMA
 emulation must be tested before enabling static Memory Manager and NFD's

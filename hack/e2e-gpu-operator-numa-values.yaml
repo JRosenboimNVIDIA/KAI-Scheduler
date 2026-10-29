@@ -17,9 +17,9 @@ node-feature-discovery:
     annotations:
       nvml-mock.nvidia.com/inject: "false"
     config:
-      # This experiment supplies GPU topology. CPU/Memory Managers remain off.
+      # Static CPU Manager supplies real CPU allocations. Memory Manager remains off.
       excludeList:
-        '*': [cpu, memory]
+        '*': [memory]
     resources:
       requests:
         cpu: 50m

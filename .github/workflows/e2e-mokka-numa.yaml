@@ -82,7 +82,7 @@ jobs:
             echo '### Mokka NUMA experiment'
             echo 'Real driver, toolkit, device plugin, NFD topology updater, and kubelet pod-resources socket.'
             echo 'Four GPU nodes: two single-numa-node, one restricted, one best-effort; eight GPUs per node, split 4+4.'
-            echo 'CPU Manager and Memory Manager are disabled. Cases that need CPU/memory NRT resources can skip.'
+            echo 'Static CPU Manager is enabled. Memory Manager is disabled; cases that need memory NRT resources can skip.'
             echo 'The unchanged Burstable cross-zone case expects admission; real kubelet enforcement can reject it.'
             echo 'See numa-results for test results, skip reasons, and cluster logs.'
           } >> "$GITHUB_STEP_SUMMARY"

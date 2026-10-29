@@ -78,6 +78,28 @@ func DescribeNUMAModesSpecs() bool {
 			wait.ForPodScheduled(ctx, testCtx.ControllerClient, fitPod)
 		})
 
+		It("single-numa-node - CPU and GPU allocations share a zone", func(ctx context.Context) {
+			node := firstMatch(ctx, testCtx, numautil.Requirement{Policy: numautil.PolicySingleNUMANode, MinZones: 2, ZoneGPUs: 1})
+			cpuCapacity := node.MaxZoneCPU()
+			if cpuCapacity.Cmp(resource.MustParse("1")) < 0 {
+				Skip("need static CPU Manager with at least one exclusive CPU")
+			}
+			pod := createPod(ctx, testCtx, node.Pin(numautil.GuaranteedGPUCPUPod(
+				childQueue(testCtx), 1, resource.MustParse("1"), resource.MustParse("128Mi"))))
+			expectGuaranteed(ctx, testCtx, pod)
+			wait.ForPodReady(ctx, testCtx.ControllerClient, pod)
+			Eventually(func(g Gomega) {
+				fresh, err := testCtx.KubeClientset.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+				g.Expect(err).To(Succeed())
+				observed := numautil.ObservedZones(fresh)
+				g.Expect(observed).To(HaveLen(1))
+				cpu := observed[0].Amount[v1.ResourceCPU]
+				gpu := observed[0].Amount[constants.NvidiaGpuResource]
+				g.Expect(cpu.Cmp(resource.MustParse("1"))).To(BeZero())
+				g.Expect(gpu.Value()).To(Equal(int64(1)))
+			}, placementTimeout, time.Second).Should(Succeed())
+		})
+
 		It("restricted - two-zone request at matching minimal width is scheduled", func(ctx context.Context) {
 			node := firstMatch(ctx, testCtx, numautil.Requirement{Policy: numautil.PolicyRestricted, MinZones: 2})
 			gpus, gpusOK := node.SpanTwoZonesGPUs()
