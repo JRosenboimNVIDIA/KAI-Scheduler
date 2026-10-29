@@ -50,8 +50,6 @@ jobs:
       - name: Build KAI from this PR and install Mokka, GPU Operator, and NRT reporter
         run: |
           ./hack/setup-e2e-cluster.sh --local-images-build --skip-kai-install --feature-config numa-full
-      - name: Leave exclusive CPUs available for NUMA probes
-        run: ./hack/prepare-mokka-numa-tests.sh
       - name: Check NRT topology and policies
         run: python3 hack/check-mokka-numa.py
       - name: Install KAI with NUMA scheduling and the real kubelet socket

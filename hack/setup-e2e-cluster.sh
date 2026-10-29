@@ -196,6 +196,11 @@ if [ "$TEST_THIRD_PARTY_INTEGRATIONS" = "true" ]; then
     ${REPO_ROOT}/hack/third_party_integrations/deploy_jobset.sh
 fi
 
+# Move the disposable registry before pushing images; moving it later loses its data.
+if [[ "$GPU_STACK" = mokka && "$FEATURE_CONFIG" = numa-full ]]; then
+    "${REPO_ROOT}/hack/prepare-mokka-numa-tests.sh"
+fi
+
 # Build and install kai-scheduler
 if [ -z "$PACKAGE_VERSION" ]; then
     if [ "$LOCAL_IMAGES_BUILD" = "true" ]; then

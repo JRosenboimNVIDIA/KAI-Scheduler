@@ -1,53 +1,71 @@
 # Mokka NUMA CI experiment
 
-This change extends the GPU Operator + Mokka draft in upstream PR #2543.
-The dedicated `E2E - Mokka NUMA experiment` workflow builds KAI from the PR.
-It uses a GitHub-hosted runner so it can run in the fork.
+This change extends upstream draft PR #2543. The dedicated workflow builds KAI
+from the PR and runs on a GitHub-hosted runner, without adding a VM.
 
-The `numa-full` layout has four GPU workers. Each worker has eight A100 GPUs,
-split between two NUMA zones (four GPUs per zone). Two workers use
-`single-numa-node`; one uses `restricted`; one uses `best-effort`.
-The CPU-only worker has no Mokka or NRT report.
+## Stack
 
-Mokka is pinned to `51e4d79be7fe377804269c00194ca60efca25dd8` in the public
-`JRosenboimNVIDIA/mokka` fork. This includes Roman's GPU Operator support,
-the memory-limit API fix, and the opt-in NUMA simulation. Three disjoint
-Mokka releases set `numaSimulation.enabled=true`, `configureKubelet=true`,
-the required `topologyManagerPolicy`, and `cpuManagerPolicy: static`. One real CPU
-is reserved for the system pool. Mokka changes each selected
-kind node's sysfs view and restarts its kubelet. Only disposable kind nodes
-are used.
+The `numa-full` kind layout has four GPU workers, with eight A100 GPUs each,
+split 4+4 between two zones. Two workers use `single-numa-node`; one uses
+`restricted`; one uses `best-effort`. A CPU worker runs the control services.
 
-GPU Operator v26.7.2 runs its driver, toolkit, and device plugin. Its NFD
-Topology Updater publishes the NRT objects. NFD reads allocatable resources
-once when it starts. The setup restarts this reporter after kubelet reports
-eight GPUs on every GPU worker, so its resource snapshot includes the GPUs.
-KAI's NUMA plugin is enabled.
-Its placement exporter uses the real kubelet pod-resources socket and `/sys`.
-There is no FGO, fake socket, or manually created NRT object.
+Mokka is pinned to `c036c2106176f30640213056f3322ac77e37978a` in the public
+`JRosenboimNVIDIA/mokka` fork. It includes Roman's GPU Operator support, the
+memory-limit fix, and the opt-in NUMA extension. Each selected node uses:
 
-The full `numa` label is selected, including nightly cases. The existing
-expectations are unchanged. Failures remain failures. Ginkgo JSON/JUnit and
-cluster logs are uploaded even if setup or tests fail.
+```yaml
+numaSimulation:
+  enabled: true
+  configureKubelet: true
+  topologyManagerPolicy: restricted # varies by pool
+  cpuManagerPolicy: static
+  memoryManagerPolicy: Static
+  systemReservedMemory: 256Mi
+```
 
-## Current limits
+Mokka reserves a real CPU for the shared system pool, configures memory
+reservations, backs up manager checkpoints, and restarts kubelet. Restore
+simulation before changing active policies; use fresh or drained test nodes.
 
-CPU Manager is `static` and Memory Manager is `None`. NFD publishes CPU and GPU
-resources, and excludes memory. A dedicated case checks that a Guaranteed pod
-receives one real CPU and one GPU in the same observed zone. Cases that require these resources can skip. This run does not prove physical memory locality.
+CPU Manager assigns real CPU IDs. Memory Manager keeps simulated memory groups
+in its own state, exposed by the real kubelet pod-resources socket. Mokka's NRI
+plugin maps simulated memory-node masks to kernel-allowed nodes when creating
+or updating containers. CPU IDs and memory limits are preserved. This tests
+scheduler decisions and observations; it does not prove physical memory locality.
 
-CPU placement uses real online CPU IDs in the simulated zones. Memory locality
-needs memory NUMA nodes that the Linux kernel can use. Sysfs files alone
-do not create those kernel memory nodes. A NUMA-capable VM or kernel NUMA
-emulation must be tested before enabling static Memory Manager and NFD's
-CPU/memory reports. This is separate work in the node environment and
-Mokka's kubelet configuration.
+GPU Operator v26.7.2 runs its real driver, toolkit, and device plugin. Its NFD
+Topology Updater publishes GPU, CPU, and memory resources. NFD snapshots capacity
+at startup, so setup restarts it after all eight GPUs register on every GPU worker.
+There is no FGO, fake kubelet socket, or manually created NRT object.
 
-The existing `Burstable cross-zone request passes through` case can fail:
-real kubelet GPU topology checks also apply to Burstable pods. The result
-must remain visible; the test is not changed to hide the difference.
+## CI resource budget
 
-## Run locally on a disposable Docker host
+On a four-CPU runner the width-two probe can request all three exclusive CPUs.
+Control Deployments are placed on the CPU worker. GPU-node agents use the
+reserved shared CPU with zero CPU requests in this disposable experiment.
+Kindnet stays Burstable so it does not hold a permanent single-zone memory group.
+These are test resource-budget settings, not added resource capacity.
+
+The registry is moved before building/pushing KAI images. It has ephemeral
+storage; moving it after pushing would discard those images.
+
+## Tests and reports
+
+The full `numa` label includes nightly cases. Existing expectations are unchanged.
+Added cases check CPU/GPU placement, and that real containers become Ready with
+CPU, GPU, and memory allocations in both zones. JSON/JUnit reports and cluster
+logs are uploaded even if setup or tests fail.
+
+The unchanged `Burstable cross-zone request passes through` test expects admission
+that conflicts with current KAI GPU alignment rules. It can fail, causing the next
+case in that ordered group to skip. CPU/memory cases must execute with this setup;
+missing topology fails the initial check instead of silently skipping all of them.
+
+The local scheduler and placement exporter must include the current memory-group
+support. v0.18.6 does not publish the observed memory-group annotation used by
+these tests. CI builds the current PR components.
+
+## Run on a disposable Docker host
 
 ```bash
 export CLUSTER_NAME=mokka-numa-ci GPU_STACK=mokka FEATURE_CONFIG=numa-full
@@ -59,6 +77,7 @@ helm upgrade --install kai-scheduler "./charts/kai-scheduler-$PACKAGE_VERSION.tg
   --values hack/kai-scheduler-mokka-values.yaml \
   --values hack/kai-scheduler-mokka-numa-values.yaml \
   --set global.registry=localhost:30100 --set prometheus.enabled=true \
+  --set 'global.nodeSelector.mokka\.nvidia\.com/e2e-cpu=true' \
   --wait --timeout 10m
 go tool ginkgo --keep-going --trace -vv --label-filter numa --timeout 45m \
   --output-dir=numa-results --json-report=report.json --junit-report=junit.xml \
