@@ -5,10 +5,9 @@
 set -euo pipefail
 
 # On four-CPU runners a two-zone integer CPU probe can need every exclusive CPU.
-# Put control services on the CPU worker and account GPU-node agents in the
-# reserved shared CPU instead of consuming the exclusive CPU request budget.
+# Keep control services on the CPU worker. The fractional kubelet system CPU
+# reservation leaves request headroom for ordinary GPU-node agents.
 kubectl get nodes -l mokka.nvidia.com/e2e-cpu=true -o name | grep -q .
-kubectl -n kube-system set resources daemonset/kindnet --requests=cpu=0
 kubectl get deployments -A -o json | python3 -c '
 import json,sys
 for deployment in json.load(sys.stdin)["items"]:

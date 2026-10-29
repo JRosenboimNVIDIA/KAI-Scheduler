@@ -9,7 +9,7 @@ The `numa-full` kind layout has four GPU workers, with eight A100 GPUs each,
 split 4+4 between two zones. Two workers use `single-numa-node`; one uses
 `restricted`; one uses `best-effort`. A CPU worker runs the control services.
 
-Mokka is pinned to `c036c2106176f30640213056f3322ac77e37978a` in the public
+Mokka is pinned to `39ef93e09eb1c637b374109f27647faa43f5c0ee` in the public
 `JRosenboimNVIDIA/mokka` fork. It includes Roman's GPU Operator support, the
 memory-limit fix, and the opt-in NUMA extension. Each selected node uses:
 
@@ -21,9 +21,10 @@ numaSimulation:
   cpuManagerPolicy: static
   memoryManagerPolicy: Static
   systemReservedMemory: 256Mi
+  systemReservedCPU: 100m
 ```
 
-Mokka reserves a real CPU for the shared system pool, configures memory
+Mokka configures a fractional CPU reservation and whole shared-pool CPU IDs, configures memory
 reservations, backs up manager checkpoints, and restarts kubelet. Restore
 simulation before changing active policies; use fresh or drained test nodes.
 
@@ -41,10 +42,11 @@ There is no FGO, fake kubelet socket, or manually created NRT object.
 ## CI resource budget
 
 On a four-CPU runner the width-two probe can request all three exclusive CPUs.
-Control Deployments are placed on the CPU worker. GPU-node agents use the
-reserved shared CPU with zero CPU requests in this disposable experiment.
-Kindnet stays Burstable so it does not hold a permanent single-zone memory group.
-These are test resource-budget settings, not added resource capacity.
+Control Deployments are placed on the CPU worker. A `100m` system CPU reservation
+makes kubelet keep one shared CPU ID while advertising 3.9 allocatable CPU on a
+four-CPU node; the real exclusive CPU inventory remains three. This leaves room
+for ordinary agent requests alongside a three-CPU probe. Kindnet stays Burstable
+so it does not hold a permanent single-zone memory group. No CPU capacity is added.
 
 The registry is moved before building/pushing KAI images. It has ephemeral
 storage; moving it after pushing would discard those images.

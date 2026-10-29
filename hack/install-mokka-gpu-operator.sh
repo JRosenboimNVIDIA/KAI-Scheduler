@@ -16,7 +16,7 @@ fi
 # PR 1109, the memory-limit fix, and opt-in NUMA sysfs/kubelet simulation.
 # Keep this commit pinned until the integration is available in an upstream release.
 : "${MOKKA_REPOSITORY:=https://github.com/JRosenboimNVIDIA/mokka.git}"
-: "${MOKKA_REF:=c036c2106176f30640213056f3322ac77e37978a}"
+: "${MOKKA_REF:=39ef93e09eb1c637b374109f27647faa43f5c0ee}"
 : "${MOKKA_IMAGE_REPOSITORY:=mokka-e2e}"
 : "${MOKKA_IMAGE_TAG:=${MOKKA_REF:0:12}}"
 
@@ -42,7 +42,7 @@ if [[ "$FEATURE_CONFIG" = numa-full ]]; then
       --namespace mokka --create-namespace "${MOKKA_VALUES[@]}" \
       --set 'numaSimulation.enabled=true' --set 'numaSimulation.configureKubelet=true' \
       --set 'numaSimulation.cpuManagerPolicy=static' --set 'numaSimulation.memoryManagerPolicy=Static' \
-      --set 'nodeAgent.resources.requests.cpu=0' --set 'nri.resources.requests.cpu=0' \
+      --set 'numaSimulation.systemReservedCPU=100m' \
       --set "numaSimulation.topologyManagerPolicy=$policy" \
       --set "nodeSelector.mokka\\.nvidia\\.com/numa-policy=$policy" \
       --wait --timeout 10m
