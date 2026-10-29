@@ -18,7 +18,10 @@ kind node's sysfs view and restarts its kubelet. Only disposable kind nodes
 are used.
 
 GPU Operator v26.7.2 runs its driver, toolkit, and device plugin. Its NFD
-Topology Updater publishes the NRT objects. KAI's NUMA plugin is enabled.
+Topology Updater publishes the NRT objects. NFD reads allocatable resources
+once when it starts. The setup restarts this reporter after kubelet reports
+eight GPUs on every GPU worker, so its resource snapshot includes the GPUs.
+KAI's NUMA plugin is enabled.
 Its placement exporter uses the real kubelet pod-resources socket and `/sys`.
 There is no FGO, fake socket, or manually created NRT object.
 

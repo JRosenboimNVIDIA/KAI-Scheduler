@@ -61,3 +61,12 @@ kubectl wait --for=jsonpath='{.status.state}'=ready clusterpolicy/cluster-policy
 kubectl wait \
   --for="jsonpath={.status.allocatable.nvidia\\.com/gpu}=$MOKKA_GPU_COUNT" \
   nodes --selector=mokka.nvidia.com/e2e-gpu=true --timeout=5m
+
+if [[ "$FEATURE_CONFIG" = numa-full ]]; then
+  # NFD caches allocatable resources at startup, before GPU registration can finish.
+  # Refresh that snapshot only after kubelet reports the expected GPU count.
+  kubectl --namespace gpu-operator rollout restart \
+    daemonset/gpu-operator-node-feature-discovery-topology-updater
+  kubectl --namespace gpu-operator rollout status \
+    daemonset/gpu-operator-node-feature-discovery-topology-updater --timeout=5m
+fi
