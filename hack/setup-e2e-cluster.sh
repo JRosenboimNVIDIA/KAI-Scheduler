@@ -104,8 +104,8 @@ case "$GPU_STACK" in
   *) echo "GPU_STACK must be mokka or fake"; exit 1 ;;
 esac
 
-if [[ "$GPU_STACK" = "mokka" && "$FEATURE_CONFIG" != "default" ]]; then
-  echo "The Mokka testing setup supports the default layout. Use GPU_STACK=fake for the existing DRA/NUMA layouts."
+if [[ "$GPU_STACK" = "mokka" && "$FEATURE_CONFIG" != "default" && "$FEATURE_CONFIG" != "numa-full" ]]; then
+  echo "The Mokka testing setup supports default and numa-full. Use GPU_STACK=fake for DRA."
   exit 1
 fi
 
@@ -139,7 +139,7 @@ kubectl apply -f ${REPO_ROOT}/hack/local_registry.yaml
 kubectl wait --for=condition=available --timeout=60s deployment/registry -n kube-registry
 
 if [ "$GPU_STACK" = "mokka" ]; then
-  CLUSTER_NAME="$CLUSTER_NAME" "${REPO_ROOT}/hack/install-mokka-gpu-operator.sh"
+  CLUSTER_NAME="$CLUSTER_NAME" FEATURE_CONFIG="$FEATURE_CONFIG" "${REPO_ROOT}/hack/install-mokka-gpu-operator.sh"
   KAI_GPU_VALUES="${REPO_ROOT}/hack/kai-scheduler-mokka-values.yaml"
 else
   # Preserve the dedicated FGO topology setups; they are outside this experiment.

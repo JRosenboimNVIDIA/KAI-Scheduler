@@ -7,11 +7,16 @@ set -euo pipefail
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 : "${CLUSTER_NAME:?Set CLUSTER_NAME to the disposable kind cluster}"
 : "${MOKKA_GPU_COUNT:=8}"
+: "${FEATURE_CONFIG:=default}"
+if [[ "$FEATURE_CONFIG" = numa-full && "$MOKKA_GPU_COUNT" != 8 ]]; then
+  echo "The NUMA layout requires eight A100 GPUs (four per zone)." >&2
+  exit 1
+fi
 : "${GPU_OPERATOR_VERSION:=v26.7.2}"
-# PR 1109's tested GPU Operator support plus the memory-limit fix from PR 1130.
+# PR 1109, the memory-limit fix, and opt-in NUMA sysfs/kubelet simulation.
 # Keep this commit pinned until the integration is available in an upstream release.
 : "${MOKKA_REPOSITORY:=https://github.com/JRosenboimNVIDIA/mokka.git}"
-: "${MOKKA_REF:=fe859af25b05f1ea4e4e91e56c89491b8e6dc7b4}"
+: "${MOKKA_REF:=51e4d79be7fe377804269c00194ca60efca25dd8}"
 : "${MOKKA_IMAGE_REPOSITORY:=mokka-e2e}"
 : "${MOKKA_IMAGE_TAG:=${MOKKA_REF:0:12}}"
 
@@ -26,18 +31,31 @@ docker build --file "$SOURCE_DIR/deployments/nvml-mock/Dockerfile" \
   --tag "$MOKKA_IMAGE_REPOSITORY:$MOKKA_IMAGE_TAG" "$SOURCE_DIR"
 kind load docker-image --name "$CLUSTER_NAME" "$MOKKA_IMAGE_REPOSITORY:$MOKKA_IMAGE_TAG"
 
-helm upgrade --install nvml-mock "$SOURCE_DIR/deployments/nvml-mock/helm/nvml-mock" \
-  --namespace mokka --create-namespace \
-  --values "$REPO_ROOT/hack/e2e-mokka-values.yaml" \
-  --set "image.repository=$MOKKA_IMAGE_REPOSITORY" \
-  --set "image.tag=$MOKKA_IMAGE_TAG" --set "gpu.count=$MOKKA_GPU_COUNT" \
-  --wait --timeout 10m
+MOKKA_VALUES=(--values "$REPO_ROOT/hack/e2e-mokka-values.yaml"
+  --set "image.repository=$MOKKA_IMAGE_REPOSITORY"
+  --set "image.tag=$MOKKA_IMAGE_TAG" --set "gpu.count=$MOKKA_GPU_COUNT")
+GPU_OPERATOR_VALUES=(--values "$REPO_ROOT/hack/e2e-gpu-operator-values.yaml")
+if [[ "$FEATURE_CONFIG" = numa-full ]]; then
+  # Separate releases keep the policy settings local to each selected node.
+  for policy in single-numa-node restricted best-effort; do
+    helm upgrade --install "nvml-mock-$policy" "$SOURCE_DIR/deployments/nvml-mock/helm/nvml-mock" \
+      --namespace mokka --create-namespace "${MOKKA_VALUES[@]}" \
+      --set 'numaSimulation.enabled=true' --set 'numaSimulation.configureKubelet=true' \
+      --set "numaSimulation.topologyManagerPolicy=$policy" \
+      --set "nodeSelector.mokka\\.nvidia\\.com/numa-policy=$policy" \
+      --wait --timeout 10m
+  done
+  GPU_OPERATOR_VALUES+=(--values "$REPO_ROOT/hack/e2e-gpu-operator-numa-values.yaml")
+else
+  helm upgrade --install nvml-mock "$SOURCE_DIR/deployments/nvml-mock/helm/nvml-mock" \
+    --namespace mokka --create-namespace "${MOKKA_VALUES[@]}" --wait --timeout 10m
+fi
 
 helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update
 helm repo update nvidia
 helm upgrade --install gpu-operator nvidia/gpu-operator \
   --version "$GPU_OPERATOR_VERSION" --namespace gpu-operator --create-namespace \
-  --values "$REPO_ROOT/hack/e2e-gpu-operator-values.yaml" --wait --timeout 15m
+  "${GPU_OPERATOR_VALUES[@]}" --wait --timeout 15m
 
 kubectl wait --for=jsonpath='{.status.state}'=ready clusterpolicy/cluster-policy --timeout=15m
 kubectl wait \
