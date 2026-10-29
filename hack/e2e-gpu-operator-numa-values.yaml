@@ -7,6 +7,10 @@ toolkit:
     - name: RUNTIME_CONFIG_SOURCE
       value: file
 node-feature-discovery:
+  worker:
+    resources:
+      requests:
+        cpu: "0"
   topologyUpdater:
     enable: true
     createCRDs: true
@@ -17,12 +21,11 @@ node-feature-discovery:
     annotations:
       nvml-mock.nvidia.com/inject: "false"
     config:
-      # Static CPU Manager supplies real CPU allocations. Memory Manager remains off.
-      excludeList:
-        '*': [memory]
+      # Both managers publish allocations through the real kubelet socket.
+      excludeList: {}
     resources:
       requests:
-        cpu: 50m
+        cpu: "0"
         memory: 64Mi
       limits:
         memory: 128Mi

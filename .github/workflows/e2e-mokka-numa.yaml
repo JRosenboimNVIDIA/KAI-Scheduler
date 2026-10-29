@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mokka-numa-${{ github.event.pull_request.number || github.ref }}
+  group: mokka-numa-memory-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -50,6 +50,8 @@ jobs:
       - name: Build KAI from this PR and install Mokka, GPU Operator, and NRT reporter
         run: |
           ./hack/setup-e2e-cluster.sh --local-images-build --skip-kai-install --feature-config numa-full
+      - name: Leave exclusive CPUs available for NUMA probes
+        run: ./hack/prepare-mokka-numa-tests.sh
       - name: Check NRT topology and policies
         run: python3 hack/check-mokka-numa.py
       - name: Install KAI with NUMA scheduling and the real kubelet socket
@@ -59,6 +61,7 @@ jobs:
             --values hack/kai-scheduler-mokka-values.yaml \
             --values hack/kai-scheduler-mokka-numa-values.yaml \
             --set global.registry=localhost:30100 --set prometheus.enabled=true \
+            --set 'global.nodeSelector.mokka\.nvidia\.com/e2e-cpu=true'  \
             --wait --timeout 10m
           kubectl -n kai-scheduler rollout status deployment/kai-operator --timeout=5m
       - name: Run all NUMA cases, including nightly cases
@@ -82,7 +85,7 @@ jobs:
             echo '### Mokka NUMA experiment'
             echo 'Real driver, toolkit, device plugin, NFD topology updater, and kubelet pod-resources socket.'
             echo 'Four GPU nodes: two single-numa-node, one restricted, one best-effort; eight GPUs per node, split 4+4.'
-            echo 'Static CPU Manager is enabled. Memory Manager is disabled; cases that need memory NRT resources can skip.'
+            echo 'Static CPU and Memory Managers are enabled. Mokka NRI maps simulated memory affinity onto host-allowed nodes.'
             echo 'The unchanged Burstable cross-zone case expects admission; real kubelet enforcement can reject it.'
             echo 'See numa-results for test results, skip reasons, and cluster logs.'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -153,4 +153,8 @@ esac
 
   echo "# CPU Node"
   echo "- role: worker"
+  if [ "$GPU_STACK" = "mokka" ] && [ "$FEATURE_CONFIG" = "numa-full" ]; then
+    echo "  labels:"
+    echo '    mokka.nvidia.com/e2e-cpu: "true"'
+  fi
 } > "$OUTPUT"

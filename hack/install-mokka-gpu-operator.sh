@@ -16,7 +16,7 @@ fi
 # PR 1109, the memory-limit fix, and opt-in NUMA sysfs/kubelet simulation.
 # Keep this commit pinned until the integration is available in an upstream release.
 : "${MOKKA_REPOSITORY:=https://github.com/JRosenboimNVIDIA/mokka.git}"
-: "${MOKKA_REF:=6b3a3069769cecb906e4141af9269e459f3b7d02}"
+: "${MOKKA_REF:=f76122cabaf913397a5f92e434ea3326d4e9fa2d}"
 : "${MOKKA_IMAGE_REPOSITORY:=mokka-e2e}"
 : "${MOKKA_IMAGE_TAG:=${MOKKA_REF:0:12}}"
 
@@ -41,7 +41,8 @@ if [[ "$FEATURE_CONFIG" = numa-full ]]; then
     helm upgrade --install "nvml-mock-$policy" "$SOURCE_DIR/deployments/nvml-mock/helm/nvml-mock" \
       --namespace mokka --create-namespace "${MOKKA_VALUES[@]}" \
       --set 'numaSimulation.enabled=true' --set 'numaSimulation.configureKubelet=true' \
-      --set 'numaSimulation.cpuManagerPolicy=static' \
+      --set 'numaSimulation.cpuManagerPolicy=static' --set 'numaSimulation.memoryManagerPolicy=Static' \
+      --set 'nodeAgent.resources.requests.cpu=0' --set 'nri.resources.requests.cpu=0' \
       --set "numaSimulation.topologyManagerPolicy=$policy" \
       --set "nodeSelector.mokka\\.nvidia\\.com/numa-policy=$policy" \
       --wait --timeout 10m
