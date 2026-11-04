@@ -1,0 +1,149 @@
+# Copyright 2026 NVIDIA CORPORATION
+# SPDX-License-Identifier: Apache-2.0
+name: E2E - FGO NUMA control
+run-name: FGO NUMA control - Burstable and QoS
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fgo-numa-burstable-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  numa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CLUSTER_NAME: fgo-numa-control
+      FEATURE_CONFIG: numa-full
+      GPU_STACK: fake
+      DOCKER_BUILDX_ADDITIONAL_ARGS: --load
+      PACKAGE_VERSION: 0.0.0-fgo-numa-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - uses: helm/kind-action@v1.14.0
+        with:
+          install_only: true
+          version: v0.32.0
+      - name: Verify the same KAI source and tests as the Mokka run
+        run: |
+          git diff --exit-code 4ea44a6b677707b5a99b51ffd30c6ece970e44d6 HEAD -- cmd pkg test go.mod go.sum deployments
+          mkdir -p fgo-numa-results
+          git rev-parse HEAD > fgo-numa-results/revision.txt
+          sha256sum test/e2e/suites/numa/qos_specs_test.go > fgo-numa-results/test-source.sha256
+      - name: Prepare runner
+        run: |
+          sudo sysctl -w fs.inotify.max_user_instances=1280 fs.inotify.max_user_watches=655360
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h
+      - name: Build the same KAI and install the standard FGO NUMA setup
+        run: |
+          ./hack/setup-e2e-cluster.sh --local-images-build --feature-config numa-full
+          helm upgrade kai-scheduler "./deployments/kai-scheduler" \
+            --namespace kai-scheduler --reuse-values \
+            --set global.tag="$PACKAGE_VERSION" \
+            --set scheduler.plugins.numa.enabled=true --wait --timeout 10m
+          kubectl -n kai-scheduler wait --for=create daemonset/numa-placement-exporter --timeout=3m
+          kubectl -n kai-scheduler rollout status daemonset/numa-placement-exporter --timeout=5m
+      - name: Require FGO single-NUMA-node topology with eight GPUs split four plus four
+        run: |
+          python3 - <<'PYTHON'
+          import json, subprocess, time
+          for attempt in range(60):
+              try:
+                  nodes = json.loads(subprocess.check_output([
+                      "kubectl", "get", "nodes", "-l",
+                      "run.ai/simulated-gpu-node-pool=numa-single", "-o", "json"]))["items"]
+                  reports = {r["metadata"]["name"]: r for r in json.loads(subprocess.check_output([
+                      "kubectl", "get", "noderesourcetopologies", "-o", "json"]))["items"]}
+                  assert len(nodes) == 2, f"expected two single-numa-node workers, got {len(nodes)}"
+                  for node in nodes:
+                      name = node["metadata"]["name"]
+                      assert node["status"]["allocatable"].get("nvidia.com/gpu") == "8", name
+                      report = reports[name]
+                      attrs = {a["name"]: a["value"] for a in report.get("attributes", [])}
+                      assert attrs.get("topologyManagerPolicy") == "single-numa-node", (name, attrs)
+                      zones = sorted(int(r["allocatable"]) for z in report["zones"]
+                                     for r in z.get("resources", []) if r["name"] == "nvidia.com/gpu")
+                      assert zones == [4, 4], (name, zones)
+                      print(f"{name}: policy=single-numa-node, GPUs={zones}", flush=True)
+                  break
+              except (AssertionError, KeyError, subprocess.CalledProcessError) as error:
+                  if attempt == 59:
+                      raise
+                  print(f"Waiting for FGO: {error}", flush=True)
+                  time.sleep(5)
+          PYTHON
+          helm list -A > fgo-numa-results/helm-before-tests.txt
+          helm get values kai-scheduler -n kai-scheduler --all > fgo-numa-results/kai-values.yaml
+          helm get values gpu-operator -n gpu-operator --all > fgo-numa-results/fgo-values.yaml
+          kubectl get nodes -o yaml > fgo-numa-results/nodes-before-tests.yaml
+          kubectl get noderesourcetopologies -o yaml > fgo-numa-results/nrt-before-tests.yaml
+      - name: Run the unchanged NUMA QoS tests including the Burstable case
+        run: |
+          go tool ginkgo --keep-going --trace -vv --label-filter numa \
+            --focus 'NUMA QoS gating' --timeout 20m \
+            --output-dir=fgo-numa-results --json-report=report.json --junit-report=junit.xml \
+            ./test/e2e/suites/numa
+      - name: Require the Burstable test to execute and record its result
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          path = Path("fgo-numa-results/report.json")
+          assert path.is_file(), "No Ginkgo report: setup did not reach the test suite"
+          specs = [spec for suite in json.loads(path.read_text()) for spec in suite["SpecReports"]]
+          cases = [spec for spec in specs if spec["LeafNodeText"] == "Burstable cross-zone request passes through"]
+          assert len(cases) == 1, f"expected one Burstable case, found {len(cases)}"
+          case = cases[0]
+          state = case["State"]
+          assert state in {"passed", "failed", "timedout", "panicked"}, f"Burstable case did not execute: {state}"
+          summary = "### FGO NUMA control\n\n"
+          summary += "Same KAI source and unchanged QoS tests as Mokka run 40944141633.\n\n"
+          summary += "FGO 0.2.0, numa-full layout, eight GPUs per worker, four GPUs per zone.\n\n"
+          summary += f"**Burstable test: {state}.**\n\n"
+          for spec in specs:
+              if "NUMA QoS gating" in spec.get("ContainerHierarchyTexts", []):
+                  summary += f"- {spec['LeafNodeText']}: {spec['State']}\n"
+          summary += "\n" + case.get("Failure", {}).get("Message", "") + "\n"
+          print(summary)
+          Path("fgo-numa-results/burstable-result.md").write_text(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+              output.write(summary)
+          PYTHON
+      - name: Collect cluster state and logs
+        if: always()
+        run: |
+          mkdir -p fgo-numa-results
+          kubectl get nodes -o yaml > fgo-numa-results/nodes.yaml 2>&1 || true
+          kubectl get noderesourcetopologies -o yaml > fgo-numa-results/nrt.yaml 2>&1 || true
+          kubectl get pods -A -o yaml > fgo-numa-results/pods.yaml 2>&1 || true
+          kubectl get events -A --sort-by=.lastTimestamp > fgo-numa-results/events.txt 2>&1 || true
+          kubectl get config -o yaml > fgo-numa-results/kai-config.yaml 2>&1 || true
+          for deployment in $(kubectl -n kai-scheduler get deployment -o name); do
+            kubectl -n kai-scheduler logs "$deployment" --all-containers=true --tail=5000 \
+              > "fgo-numa-results/${deployment#deployment.apps/}.log" 2>&1 || true
+          done
+          kind export logs fgo-numa-results/kind --name "$CLUSTER_NAME" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fgo-numa-control-results
+          path: fgo-numa-results
+      - name: Delete disposable cluster
+        if: always()
+        run: kind delete cluster --name "$CLUSTER_NAME"

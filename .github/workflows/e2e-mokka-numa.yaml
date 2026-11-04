@@ -1,6 +1,7 @@
 # Copyright 2026 NVIDIA CORPORATION
 # SPDX-License-Identifier: Apache-2.0
 name: E2E - Mokka NUMA experiment
+run-name: NUMA tests - ${{ inputs.backend || 'mokka' }}
 
 on:
   pull_request:
@@ -10,16 +11,27 @@ on:
       - 'test/e2e/suites/numa/**'
       - 'test/e2e/modules/resources/rd/numa/**'
   workflow_dispatch:
+    inputs:
+      backend:
+        description: GPU backend for the NUMA run
+        type: choice
+        options: [mokka, fake]
+        default: mokka
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: mokka-numa-memory-${{ github.event.pull_request.number || github.ref }}
+  group: mokka-numa-memory-${{ inputs.backend || 'mokka' }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  fgo:
+    if: inputs.backend == 'fake'
+    uses: ./.github/workflows/e2e-fgo-numa.yaml
   numa:
+    if: inputs.backend != 'fake'
     # This experiment can run on a fork without the upstream CNCF runner pool.
     runs-on: ubuntu-24.04
     timeout-minutes: 120
